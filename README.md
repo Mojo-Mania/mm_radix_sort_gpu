@@ -228,14 +228,19 @@ comes at 256 Ki for `float32`, just after it for `uint32`, and at about 1 Mi
 for `uint64`. Below that the fixed cost of the kernel launches dominates, as
 on the M4 Max.
 
-**At scale the GPU wins by about 4x for 32-bit keys and 1.9x for `uint64`.**
-That margin is wider than the M4 Max's 2.2x, and the GPU is not the reason: at
-16 Mi it is only about 10% slower than the M4 Max GPU. What differs is the CPU. The Zen 5
-core's radix sort slows from about 2 ns to 5 ns per element between 1 Mi and
-4 Mi as the working set outgrows cache, and the M4 Max core's barely does.
+**At scale the GPU wins by about 4x for 32-bit keys.** That margin is wider
+than the M4 Max's ~2x, and the GPU is not the reason: at 16 Mi it is only about
+10% slower than the M4 Max GPU. What differs is the CPU. The Zen 5 core's radix
+sort slows from about 2 ns to 5 ns per element between 1 Mi and 4 Mi as the
+working set outgrows cache, and the M4 Max core's barely does.
+
+The `uint64` margin of 1.9x is not comparable: those rows are the ones the
+input-range note above applies to, where the CPU column was doing a third of
+the GPU's passes. Expect it to widen on a re-run.
 
 **`uint64` costs three times `uint32` here**, 4.03 against 1.32 ns per element
-for double the passes. On the M4 Max the ratio is 2.4x. Why it is steeper here
+for double the passes. On the M4 Max the ratio is 2.4x. This one is a GPU-column
+comparison, so the input-range note does not touch it. Why it is steeper here
 has not been investigated.
 
 **Before the histogram fix this GPU was ten times slower.** The first version
