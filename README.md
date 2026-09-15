@@ -223,11 +223,16 @@ What this table says:
 as on the M4 Max.
 
 **At scale the GPU wins by about 4x, for every type.** That margin is wider
-than the M4 Max's ~2x, and the GPU is not the reason: at 16 Mi it is only about
-10% slower than the M4 Max GPU. What differs is the CPU. Between 1 Mi and 4 Mi,
-as the working set outgrows cache, the Zen 5 core's radix sort slows from
-about 2 ns to 5 ns per element for 32-bit keys, and from about 6 ns to 15 ns
-for `uint64`. The M4 Max core's barely slows.
+than the M4 Max's ~2x, and the GPU is mostly not the reason. At 16 Mi this GPU
+is 9% slower than the M4 Max's on `uint32` and 12% on `float32` — but 39%
+slower on `uint64`, so for 64-bit keys part of the wider margin really is the
+GPU.
+
+What differs far more is the CPU: at 16 Mi the Zen 5 core takes about twice as
+long per element as the M4 Max core on 32-bit keys, and two and a half times as
+long on `uint64`. Between 1 Mi and 4 Mi, as the working set outgrows cache, its
+radix sort slows from about 2 ns to 5 ns per element for 32-bit keys, and from
+about 6 ns to 15 ns for `uint64`. The M4 Max core's barely slows.
 
 The `uint64` margin was 1.9x before the benchmark's keys spanned the full
 64 bits. With the top half always zero, the CPU sort skipped the passes whose
