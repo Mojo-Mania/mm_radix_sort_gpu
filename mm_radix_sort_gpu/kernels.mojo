@@ -17,7 +17,6 @@ scatter that fits.
 
 from max.gpu import barrier, block_dim, block_idx, grid_dim, thread_idx
 from max.gpu.memory import AddressSpace
-from std.atomic import Atomic
 from std.memory import stack_allocation
 
 from ._bits import digit, ordered_bits_of_raw, unsigned_dtype
@@ -73,6 +72,13 @@ def histogram_kernel[
 ):
     """Counts each block's digits into `block_counts[block][bucket]`.
 
+    Every thread counts its own items into its own column of
+    `counts[bucket][thread]`, then one thread per bucket totals that bucket's
+    row. No two threads ever write the same counter. The obvious alternative,
+    sixteen shared counters bumped with `Atomic.fetch_add`, is correct but
+    contended: on CUDA it made this kernel 60 times slower and ninety per cent
+    of the whole sort.
+
     Parameters:
         D: The element type.
 
@@ -83,11 +89,11 @@ def histogram_kernel[
         pass_index: Which digit this pass sorts on.
     """
     var counts = stack_allocation[
-        BUCKETS, UInt32, address_space=AddressSpace.SHARED
+        BUCKETS * THREADS, UInt32, address_space=AddressSpace.SHARED
     ]()
     var tid = Int(thread_idx.x)
-    if tid < BUCKETS:
-        counts[unsafe_offset=tid] = 0
+    for b in range(BUCKETS):
+        counts[unsafe_offset=b * THREADS + tid] = 0
     barrier()
 
     var n = Int(count)
@@ -98,13 +104,15 @@ def histogram_kernel[
         var index = base + j
         if index < n:
             var bucket = _digit_of[D](raw_keys[unsafe_offset=index], which)
-            _ = Atomic.fetch_add(counts.unsafe_offset(bucket), UInt32(1))
+            counts[unsafe_offset=bucket * THREADS + tid] += 1
     barrier()
 
+    # One thread per bucket, totalling that bucket across threads.
     if tid < BUCKETS:
-        block_counts[unsafe_offset=Int(block_idx.x) * BUCKETS + tid] = counts[
-            unsafe_offset=tid
-        ]
+        var total = UInt32(0)
+        for t in range(THREADS):
+            total += counts[unsafe_offset=tid * THREADS + t]
+        block_counts[unsafe_offset=Int(block_idx.x) * BUCKETS + tid] = total
 
 
 def scan_kernel(
