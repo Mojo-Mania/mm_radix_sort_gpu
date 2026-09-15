@@ -20,6 +20,7 @@ Times are nanoseconds per element. Lower is better.
 from max.gpu.host import DeviceContext
 from mm_radix_sort_gpu import gpu_radix_sort
 from std.random import random_float64, random_ui64, seed
+from std.sys.info import bit_width_of
 from std.time import perf_counter_ns
 
 comptime _SIZES = [1 << 16, 1 << 18, 1 << 20, 1 << 22, 1 << 24]
@@ -62,8 +63,20 @@ def bench[D: DType](ctx: DeviceContext, count: Int) raises:
         for i in range(count):
             host_values[i] = Scalar[D](random_float64() * 2000.0 - 1000.0)
     else:
-        for i in range(count):
-            host_values[i] = Scalar[D](Int(random_ui64(0, 4_000_000_000)))
+        # Integer keys must span the full width of their type. An earlier
+        # version drew every key from `[0, 4e9)`, which leaves the top half of
+        # a `UInt64` zero -- and `mm_radix_sort` skips a pass whose digit never
+        # varies, so the CPU column was doing three passes against the GPU's
+        # sixteen. The GPU sort has no such shortcut, so the comparison
+        # measured two different amounts of work.
+        comptime W = bit_width_of[D]()
+        comptime if W >= 64:
+            for i in range(count):
+                host_values[i] = rebind[Scalar[D]](random_ui64(0, UInt64.MAX))
+        else:
+            comptime LIMIT = (UInt64(1) << UInt64(W)) - 1
+            for i in range(count):
+                host_values[i] = Scalar[D](Int(random_ui64(0, LIMIT)))
 
     var pristine = ctx.enqueue_create_buffer[D](count)
     var working = ctx.enqueue_create_buffer[D](count)

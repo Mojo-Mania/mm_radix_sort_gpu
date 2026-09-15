@@ -30,9 +30,10 @@ discrete laptop GPU measured further down it is between 256 Ki and 1 Mi, and
 about 1 Mi for `uint64`.
 
 **The headline number is not the interesting one.** Against the stdlib's
-`sort` this is 45x faster on 16 Mi `uint32`. Against a *tuned single-threaded
-radix sort on the same machine* it is **2.2x**. Most of that 45x is radix
-beating comparison, which you can have on the CPU without a GPU at all.
+`sort` this is about 45x faster on 16 Mi `uint32`. Against a *tuned
+single-threaded radix sort on the same machine* it is about **2x** on the M4
+Max and about **4x** on the RTX 4050. Most of that 45x is radix beating
+comparison, which you can have on the CPU without a GPU at all.
 
 **Unified memory is why the crossover is so low.** There is no host-to-device
 transfer to amortise: on Apple silicon the buffer the GPU sorts is the same
@@ -122,47 +123,58 @@ This is the one place the GPU port needed a change to the shared bit mapping:
 
 ### Apple M4 Max (unified memory, Metal)
 
-> These numbers predate the change to `histogram_kernel` that removed its
-> atomic counters (see the RTX 4050 section below). They have not yet been
-> re-measured with it.
-
 Apple M4 Max, `-D ASSERT=none`, min of 20 runs. Every timing restores the
 working buffer from a pristine device buffer before sorting, inside the timed
 region, so no run measures already-sorted input. That restore is reported as a
 floor rather than subtracted out. Output is checked against the stdlib's
-`sort`, not merely checked for being ascending.
+`sort`, not merely checked for being ascending. Each figure is the better of
+two full `pixi run bench` runs.
+
+Those two runs agreed only to within 15%, against 1% for the RTX 4050 section
+below, so read the ratios as approximate — "about 2x at scale", not 2.15x.
 
 Nanoseconds per element. Reproduce with `pixi run bench`.
 
-| type | n | copy floor | **gpu** | cpu `lsb[11]` | host `sort` | vs cpu radix | vs `sort` |
+| type | n | copy floor | gpu | cpu `lsb[11]` | host `sort` | vs cpu radix | vs `sort` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `uint32` | 64 Ki | 1.53 | 6.15 | **2.19** | 33.9 | 0.36x | 5.5x |
-| `uint32` | 256 Ki | 0.33 | **2.01** | 2.12 | 39.6 | 1.05x | 19.7x |
-| `uint32` | 1 Mi | 0.07 | **1.23** | 2.19 | 45.3 | 1.78x | 36.9x |
-| `uint32` | 4 Mi | 0.03 | **1.16** | 2.51 | 48.6 | 2.16x | 41.8x |
-| `uint32` | 16 Mi | 0.02 | **1.19** | 2.64 | 53.4 | 2.22x | 44.9x |
-| `float32` | 1 Mi | 0.13 | **1.52** | 2.54 | 55.4 | 1.67x | 36.5x |
-| `float32` | 16 Mi | 0.02 | **1.19** | 2.85 | 67.0 | 2.40x | 56.5x |
-| `uint64` | 1 Mi | 0.10 | **2.73** | 4.78 | 45.5 | 1.75x | 16.6x |
-| `uint64` | 16 Mi | 0.04 | **2.80** | 6.32 | 53.8 | 2.26x | 19.2x |
+| `uint32` | 64 Ki | 1.16 | 6.71 | **2.08** | 33.2 | 0.31x | 4.9x |
+| `uint32` | 256 Ki | 0.28 | **1.86** | 2.06 | 39.0 | 1.11x | 21.0x |
+| `uint32` | 1 Mi | 0.12 | **1.26** | 2.09 | 44.5 | 1.66x | 35.4x |
+| `uint32` | 4 Mi | 0.04 | **1.15** | 2.42 | 48.1 | 2.11x | 42.0x |
+| `uint32` | 16 Mi | 0.02 | **1.21** | 2.59 | 54.0 | 2.15x | 44.9x |
+| `float32` | 64 Ki | 1.47 | 6.65 | **2.52** | 41.4 | 0.38x | 6.2x |
+| `float32` | 256 Ki | 0.33 | **1.84** | 2.47 | 49.6 | 1.34x | 26.9x |
+| `float32` | 1 Mi | 0.12 | **1.25** | 2.43 | 55.6 | 1.95x | 44.5x |
+| `float32` | 4 Mi | 0.04 | **1.15** | 2.61 | 61.0 | 2.27x | 53.1x |
+| `float32` | 16 Mi | 0.02 | **1.19** | 2.79 | 67.2 | 2.35x | 56.6x |
+| `uint64` | 64 Ki | 1.45 | 9.32 | **4.23** | 34.5 | 0.45x | 3.7x |
+| `uint64` | 256 Ki | 0.26 | **3.68** | 4.16 | 39.8 | 1.13x | 10.8x |
+| `uint64` | 1 Mi | 0.14 | **2.77** | 4.60 | 44.2 | 1.66x | 15.9x |
+| `uint64` | 4 Mi | 0.05 | **2.56** | 4.96 | 48.5 | 1.93x | 18.9x |
+| `uint64` | 16 Mi | 0.04 | **2.88** | 6.04 | 53.8 | 2.10x | 18.7x |
 
 The `cpu lsb[11]` column is `mm_radix_sort`'s `lsb_radix_sort[BITS=11]` on one
-core of the same machine, measured at the same sizes.
+core of the same machine, measured on the bench's exact inputs at the same
+sizes, with the same min-of-20 and a `memcpy` restore inside the timed region.
 
-Three things worth reading off it.
+What this table says:
 
 **The crossover against the CPU radix sort is around 256 Ki.** Below that the
-fixed cost of launching three kernels per pass — eight passes for a 32-bit
-type — dominates. At 64 Ki the GPU is nearly three times *slower*.
+fixed cost of launching three kernels per pass — eight for a 32-bit type,
+sixteen for a 64-bit one — dominates. At 64 Ki the GPU is three times *slower*.
 
-**At scale the GPU wins by about 2.2x, not by 45x.** Both numbers are in the
-table and the second one is the one people quote, but a tuned radix sort on
-one CPU core is already within a factor of three of a whole GPU. Radix sort is
-memory-bound, and on this machine both processors are reading the same
-memory at similar bandwidth.
+**At scale the GPU wins by about 2x, not by 45x.** Both numbers are in the
+table and the second is the one people quote, but a tuned radix sort on one
+CPU core is already within about a factor of two of a whole GPU. Radix sort is
+memory-bound and on this machine both processors read the same memory.
 
-**`uint64` costs 16 passes and it shows** — 2.8 ns/element against 1.19 for a
-32-bit type, a little over double for double the passes.
+**Removing the histogram's atomics changed nothing here.** That is the same
+change that made the RTX 4050 ten times faster. On Metal the before-and-after
+numbers are inside the run-to-run noise: `uint32` at 16 Mi was 1.19 ns with
+the contended atomic counters and is 1.21 ns without them. Whatever makes a
+threadgroup atomic expensive on CUDA does not appear to apply to Apple's GPU,
+and no attempt has been made here to find out why. It is worth knowing that
+the two backends disagree this sharply about the cost of the same primitive.
 
 ### NVIDIA RTX 4050 Laptop GPU (discrete, CUDA)
 
@@ -176,6 +188,14 @@ the better of two full `pixi run bench` runs, which agreed to within 1%.
 The buffers are created and filled once, outside the timed region, so **no
 host-to-device or device-to-host transfer is included**. On this machine that
 transfer is real PCIe traffic, and it would only add to the GPU column.
+
+> These numbers predate a fix to the benchmark's input generation and need a
+> re-run. Integer keys were drawn from `[0, 4e9)` whatever their type, so a
+> `UInt64` key had its top half permanently zero — and `mm_radix_sort` skips a
+> pass whose digit never varies, so the `cpu lsb[11]` column was doing three
+> passes against the GPU's sixteen. The `uint64` rows below therefore flatter
+> the CPU; the 32-bit rows are unaffected, since a 32-bit key was already
+> close to full width.
 
 | type | n | copy floor | gpu | cpu `lsb[11]` | host `sort` | vs cpu radix | vs `sort` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
