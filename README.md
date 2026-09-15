@@ -137,6 +137,16 @@ Nanoseconds per element. Reproduce with `pixi run bench`.
 
 | type | n | copy floor | gpu | cpu `lsb[11]` | host `sort` | vs cpu radix | vs `sort` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `float16` | 64 Ki | 1.05 | 4.03 | **2.49** | 40.8 | 0.62x | 10.1x |
+| `float16` | 256 Ki | 0.26 | **1.15** | 2.51 | 40.5 | 2.18x | 35.2x |
+| `float16` | 1 Mi | 0.08 | **0.63** | 2.52 | 39.2 | 4.01x | 62.5x |
+| `float16` | 4 Mi | 0.02 | **0.52** | 2.61 | 39.1 | 4.99x | 74.9x |
+| `float16` | 16 Mi | 0.01 | **0.54** | 2.64 | 36.7 | 4.85x | 67.5x |
+| `bfloat16` | 64 Ki | 1.31 | 3.89 | **3.62** | 32.5 | 0.93x | 8.3x |
+| `bfloat16` | 256 Ki | 0.27 | **1.21** | 3.50 | 32.9 | 2.91x | 27.3x |
+| `bfloat16` | 1 Mi | 0.07 | **0.62** | 3.59 | 32.6 | 5.76x | 52.2x |
+| `bfloat16` | 4 Mi | 0.02 | **0.52** | 3.64 | 31.3 | 6.95x | 59.8x |
+| `bfloat16` | 16 Mi | 0.01 | **0.54** | 3.68 | 31.2 | 6.83x | 57.9x |
 | `uint32` | 64 Ki | 1.16 | 6.71 | **2.08** | 33.2 | 0.31x | 4.9x |
 | `uint32` | 256 Ki | 0.28 | **1.86** | 2.06 | 39.0 | 1.11x | 21.0x |
 | `uint32` | 1 Mi | 0.12 | **1.26** | 2.09 | 44.5 | 1.66x | 35.4x |
@@ -157,7 +167,29 @@ The `cpu lsb[11]` column is `mm_radix_sort`'s `lsb_radix_sort[BITS=11]` on one
 core of the same machine, measured on the bench's exact inputs at the same
 sizes, with the same min-of-20 and a `memcpy` restore inside the timed region.
 
+**For the 16-bit rows that column flatters the GPU, and badly.** An 11-bit
+digit is a poor setting for a 16-bit key: it is neither what `radix_sort`
+picks (8 bits) nor the best available (16 bits, one pass). Measured the same
+way at 1 Mi:
+
+| | `float16` | `bfloat16` |
+| --- | ---: | ---: |
+| cpu `lsb[11]`, as tabled | 2.52 | 3.59 |
+| cpu `lsb[8]`, what `radix_sort` picks | 1.63 | 2.47 |
+| cpu `lsb[16]`, the best CPU setting | **1.32** | **1.01** |
+| **gpu** | **0.63** | **0.62** |
+
+So the honest 1 Mi margin over the CPU is 2.1x for `float16` and 1.6x for
+`bfloat16`, not the 4.0x and 5.8x the table's ratio column shows. The 32- and
+64-bit rows are unaffected: 11 bits is the right setting there, and the
+[CPU package's own README](https://github.com/Mojo-Mania/mm_radix_sort#digit-width)
+has the sweep.
+
 What this table says:
+
+**The 16-bit floats are the cheapest thing here** — 0.52 ns/element at 4 Mi,
+less than half what a 32-bit key costs, for four passes instead of eight. They
+also cross over earliest, somewhere between 64 Ki and 256 Ki.
 
 **The crossover against the CPU radix sort is around 256 Ki.** Below that the
 fixed cost of launching three kernels per pass — eight for a 32-bit type,

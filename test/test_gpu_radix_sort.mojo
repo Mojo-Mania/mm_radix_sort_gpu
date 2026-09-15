@@ -129,9 +129,21 @@ def test_every_width_and_sign() raises:
 
 
 def test_floats() raises:
+    """Every floating-point width, including the two 16-bit ones.
+
+    `float16` and `bfloat16` are the same width and take the same 16-bit path,
+    but not the same layout -- `bfloat16` spends eight bits on the exponent
+    where `float16` spends five. The mapping only ever looks at the sign bit,
+    which is why one branch covers both.
+    """
     var ctx = DeviceContext()
     seed(6)
-    comptime dtypes = [DType.float32, DType.float64]
+    comptime dtypes = [
+        DType.float16,
+        DType.bfloat16,
+        DType.float32,
+        DType.float64,
+    ]
     comptime for d in range(len(dtypes)):
         comptime dtype = dtypes[d]
         for count in [3, 1000, 20000]:
@@ -165,6 +177,19 @@ def test_float_special_values() raises:
                 host[i - 1] <= host[i],
                 String("float specials out of order at ", i),
             )
+
+
+def test_half_precision_saturates_its_key_space() raises:
+    """A 16-bit float has 65 536 possible bit patterns and no more.
+
+    At 1 Mi elements every key repeats about sixteen times, so this is the
+    tie-heaviest input the scatter ever sees: whole buckets of identical keys,
+    and a per-block rank that has to stay stable across all of them.
+    """
+    var ctx = DeviceContext()
+    seed(12)
+    _random[DType.float16](ctx, 1 << 20, "float16 n=1Mi, heavily repeated")
+    _random[DType.bfloat16](ctx, 1 << 20, "bfloat16 n=1Mi, heavily repeated")
 
 
 def test_large() raises:

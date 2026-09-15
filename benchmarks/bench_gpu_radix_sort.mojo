@@ -14,6 +14,10 @@ Unified memory means there is no host-to-device transfer to account for here.
 On a discrete GPU that transfer is usually what decides whether a sort is
 worth shipping off the CPU at all.
 
+The 16-bit floats are the cheapest thing here: four passes instead of eight,
+and only 65 536 possible keys, so at a million elements every key repeats
+about sixteen times.
+
 Times are nanoseconds per element. Lower is better.
 """
 
@@ -149,7 +153,13 @@ def main() raises:
         rjust("host sort", 10),
         rjust("vs host", 9),
     )
-    comptime dtypes = [DType.uint32, DType.float32, DType.uint64]
+    comptime dtypes = [
+        DType.float16,
+        DType.bfloat16,
+        DType.uint32,
+        DType.float32,
+        DType.uint64,
+    ]
     comptime for d in range(len(dtypes)):
         comptime dtype = dtypes[d]
         comptime for i in range(len(_SIZES)):
