@@ -26,8 +26,7 @@ runs entirely on the device.
 **Above about a quarter of a million elements.** Below that the CPU radix sort
 in `mm_radix_sort` is faster, and below a thousand or so a plain comparison
 sort is. The crossover measured on an Apple M4 Max is n ≈ 256 Ki. On the
-discrete laptop GPU measured further down it is between 256 Ki and 1 Mi, and
-about 1 Mi for `uint64`.
+discrete laptop GPU measured further down it is between 256 Ki and 1 Mi.
 
 **The headline number is not the interesting one.** Against the stdlib's
 `sort` this is about 45x faster on 16 Mi `uint32`. Against a *tuned
@@ -130,8 +129,9 @@ floor rather than subtracted out. Output is checked against the stdlib's
 `sort`, not merely checked for being ascending. Each figure is the better of
 two full `pixi run bench` runs.
 
-Those two runs agreed only to within 15%, against 1% for the RTX 4050 section
-below, so read the ratios as approximate — "about 2x at scale", not 2.15x.
+Those two runs agreed only to within 15%, against 1% for most rows of the RTX
+4050 section below, so read the ratios as approximate — "about 2x at scale",
+not 2.15x.
 
 Nanoseconds per element. Reproduce with `pixi run bench`.
 
@@ -182,38 +182,32 @@ AMD Ryzen AI 9 HX 370 host with an NVIDIA GeForce RTX 4050 Laptop GPU (6 GiB,
 PCIe 4.0 x8), Arch Linux 7.1.9, driver 610.57.04, Mojo 1.2.0.dev2026091505, MAX
 26.7.0.dev2026091505. On AC power, `performance` platform profile; the GPU sat
 in P0 at 100% utilisation with no throttle reasons active. Same method as above:
-`-D ASSERT=none`, min of 20 runs, output checked against `sort`. Each figure is
-the better of two full `pixi run bench` runs, which agreed to within 1%.
+`-D ASSERT=none`, min of 20 runs, output checked against `sort`, integer keys
+spanning the full width of their type. Each figure is the better of two full
+`pixi run bench` runs. Twelve of the fifteen rows agreed to within 1%; `float32`
+at 4 Mi and 16 Mi and `uint64` at 4 Mi differed by 5–14%.
 
 The buffers are created and filled once, outside the timed region, so **no
 host-to-device or device-to-host transfer is included**. On this machine that
 transfer is real PCIe traffic, and it would only add to the GPU column.
 
-> These numbers predate a fix to the benchmark's input generation and need a
-> re-run. Integer keys were drawn from `[0, 4e9)` whatever their type, so a
-> `UInt64` key had its top half permanently zero — and `mm_radix_sort` skips a
-> pass whose digit never varies, so the `cpu lsb[11]` column was doing three
-> passes against the GPU's sixteen. The `uint64` rows below therefore flatter
-> the CPU; the 32-bit rows are unaffected, since a 32-bit key was already
-> close to full width.
-
 | type | n | copy floor | gpu | cpu `lsb[11]` | host `sort` | vs cpu radix | vs `sort` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `uint32` | 64 Ki | 0.09 | 3.10 | **1.89** | 37.9 | 0.61x | 12.2x |
-| `uint32` | 256 Ki | 0.03 | 2.12 | **1.95** | 43.4 | 0.92x | 20.5x |
-| `uint32` | 1 Mi | 0.01 | **1.67** | 1.97 | 49.4 | 1.18x | 29.6x |
-| `uint32` | 4 Mi | 0.03 | **1.45** | 4.74 | 52.9 | 3.27x | 36.5x |
-| `uint32` | 16 Mi | 0.05 | **1.32** | 5.30 | 58.2 | 4.00x | 44.0x |
-| `float32` | 64 Ki | 0.09 | 3.13 | **2.30** | 45.3 | 0.73x | 14.5x |
-| `float32` | 256 Ki | 0.03 | **2.13** | 2.43 | 51.5 | 1.14x | 24.2x |
-| `float32` | 1 Mi | 0.01 | **1.68** | 2.45 | 56.6 | 1.46x | 33.8x |
-| `float32` | 4 Mi | 0.03 | **1.45** | 5.05 | 62.7 | 3.49x | 43.3x |
-| `float32` | 16 Mi | 0.05 | **1.33** | 5.70 | 68.8 | 4.29x | 51.9x |
-| `uint64` | 64 Ki | 0.11 | 7.81 | **2.51** | 38.0 | 0.32x | 4.9x |
-| `uint64` | 256 Ki | 0.04 | 5.39 | **2.56** | 43.5 | 0.47x | 8.1x |
-| `uint64` | 1 Mi | 0.02 | 4.25 | **4.21** | 50.6 | 0.99x | 11.9x |
-| `uint64` | 4 Mi | 0.08 | **3.91** | 7.42 | 54.0 | 1.90x | 13.8x |
-| `uint64` | 16 Mi | 0.10 | **4.03** | 7.69 | 58.8 | 1.91x | 14.6x |
+| `uint32` | 64 Ki | 0.09 | 3.10 | **1.93** | 37.2 | 0.62x | 12.0x |
+| `uint32` | 256 Ki | 0.03 | 2.12 | **1.97** | 42.0 | 0.93x | 19.8x |
+| `uint32` | 1 Mi | 0.01 | **1.66** | 1.98 | 47.6 | 1.19x | 28.6x |
+| `uint32` | 4 Mi | 0.03 | **1.45** | 4.79 | 51.7 | 3.31x | 35.7x |
+| `uint32` | 16 Mi | 0.05 | **1.32** | 5.37 | 57.6 | 4.05x | 43.5x |
+| `float32` | 64 Ki | 0.09 | 3.13 | **2.29** | 43.9 | 0.73x | 14.0x |
+| `float32` | 256 Ki | 0.03 | **2.13** | 2.40 | 50.0 | 1.13x | 23.5x |
+| `float32` | 1 Mi | 0.01 | **1.68** | 2.45 | 56.5 | 1.46x | 33.7x |
+| `float32` | 4 Mi | 0.03 | **1.27** | 5.08 | 61.3 | 3.99x | 48.1x |
+| `float32` | 16 Mi | 0.05 | **1.33** | 5.74 | 67.5 | 4.32x | 50.8x |
+| `uint64` | 64 Ki | 0.10 | 7.61 | **4.07** | 37.2 | 0.53x | 4.9x |
+| `uint64` | 256 Ki | 0.04 | 5.20 | **4.12** | 42.4 | 0.79x | 8.2x |
+| `uint64` | 1 Mi | 0.02 | **4.09** | 6.43 | 47.4 | 1.57x | 11.6x |
+| `uint64` | 4 Mi | 0.08 | **3.59** | 14.68 | 52.2 | 4.08x | 14.5x |
+| `uint64` | 16 Mi | 0.10 | **4.00** | 15.06 | 58.3 | 3.77x | 14.6x |
 
 The `cpu lsb[11]` column is `mm_radix_sort`'s `lsb_radix_sort[BITS=11]` on one
 core of the Ryzen. It was measured on the bench's exact inputs (`seed(1)`, same
@@ -223,24 +217,27 @@ different sizes and reports a mean, so it will not reproduce this column as-is.
 
 What this table says:
 
-**The crossover against the CPU radix sort is between 256 Ki and 1 Mi.** It
-comes at 256 Ki for `float32`, just after it for `uint32`, and at about 1 Mi
-for `uint64`. Below that the fixed cost of the kernel launches dominates, as
-on the M4 Max.
+**The crossover against the CPU radix sort is around 256 Ki to 1 Mi.**
+`float32` is already ahead at 256 Ki; `uint32` and `uint64` cross between
+256 Ki and 1 Mi. Below that the fixed cost of the kernel launches dominates,
+as on the M4 Max.
 
-**At scale the GPU wins by about 4x for 32-bit keys.** That margin is wider
+**At scale the GPU wins by about 4x, for every type.** That margin is wider
 than the M4 Max's ~2x, and the GPU is not the reason: at 16 Mi it is only about
-10% slower than the M4 Max GPU. What differs is the CPU. The Zen 5 core's radix
-sort slows from about 2 ns to 5 ns per element between 1 Mi and 4 Mi as the
-working set outgrows cache, and the M4 Max core's barely does.
+10% slower than the M4 Max GPU. What differs is the CPU. Between 1 Mi and 4 Mi,
+as the working set outgrows cache, the Zen 5 core's radix sort slows from
+about 2 ns to 5 ns per element for 32-bit keys, and from about 6 ns to 15 ns
+for `uint64`. The M4 Max core's barely slows.
 
-The `uint64` margin of 1.9x is not comparable: those rows are the ones the
-input-range note above applies to, where the CPU column was doing a third of
-the GPU's passes. Expect it to widen on a re-run.
+The `uint64` margin was 1.9x before the benchmark's keys spanned the full
+64 bits. With the top half always zero, the CPU sort skipped the passes whose
+digit never varied. With full-width keys it does all six of its passes, its
+16 Mi figure doubles from 7.69 to 15.06 ns per element, and the GPU's margin
+doubles with it. The GPU column barely moved, since the GPU sort makes all
+sixteen passes either way.
 
-**`uint64` costs three times `uint32` here**, 4.03 against 1.32 ns per element
-for double the passes. On the M4 Max the ratio is 2.4x. This one is a GPU-column
-comparison, so the input-range note does not touch it. Why it is steeper here
+**`uint64` costs three times `uint32` here**, 4.00 against 1.32 ns per element
+for double the passes. On the M4 Max the ratio is 2.4x. Why it is steeper here
 has not been investigated.
 
 **Before the histogram fix this GPU was ten times slower.** The first version
