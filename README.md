@@ -26,7 +26,9 @@ runs entirely on the device.
 **Above about a quarter of a million elements.** Below that the CPU radix sort
 in `mm_radix_sort` is faster, and below a thousand or so a plain comparison
 sort is. The crossover measured on an Apple M4 Max is n ≈ 256 Ki. On the
-discrete laptop GPU measured further down it is between 256 Ki and 1 Mi.
+discrete laptop GPU measured further down it is between 256 Ki and 1 Mi for
+32- and 64-bit keys, and 16-bit floats are already ahead at 64 Ki, the
+smallest size measured.
 
 **The headline number is not the interesting one.** Against the stdlib's
 `sort` this is about 45x faster on 16 Mi `uint32`. Against a *tuned
@@ -52,7 +54,7 @@ mm_radix_sort_gpu = { git = "https://github.com/Mojo-Mania/mm_radix_sort_gpu.git
 Needs the `max` package for `max.gpu`, and a device to run on. Developed
 against an Apple M4 Max through Metal; the kernels use nothing vendor-specific
 beyond threadgroup memory and barriers. They also run on NVIDIA
-through CUDA: all 16 tests pass on an RTX 4050 Laptop GPU. They have not been
+through CUDA: all 17 tests pass on an RTX 4050 Laptop GPU. They have not been
 run on AMD hardware.
 
 ## API
@@ -216,8 +218,13 @@ PCIe 4.0 x8), Arch Linux 7.1.9, driver 610.57.04, Mojo 1.2.0.dev2026091505, MAX
 in P0 at 100% utilisation with no throttle reasons active. Same method as above:
 `-D ASSERT=none`, min of 20 runs, output checked against `sort`, integer keys
 spanning the full width of their type. Each figure is the better of two full
-`pixi run bench` runs. Twelve of the fifteen rows agreed to within 1%; `float32`
-at 4 Mi and 16 Mi and `uint64` at 4 Mi differed by 5–14%.
+`pixi run bench` runs. For the 32- and 64-bit rows, twelve of fifteen agreed to
+within 1%; `float32` at 4 Mi and 16 Mi and `uint64` at 4 Mi differed by 5–14%.
+The 16-bit rows come from two later runs, which agreed to within 2% except
+`bfloat16` at 16 Mi (19%). Those later runs also re-measured the wider rows,
+and all but one landed within 4% of the table. The exception is `float32` at
+4 Mi, which read 1.37 and 1.45 against the tabled 1.27, so treat that cell as
+a lucky run.
 
 The buffers are created and filled once, outside the timed region, so **no
 host-to-device or device-to-host transfer is included**. On this machine that
@@ -225,6 +232,16 @@ transfer is real PCIe traffic, and it would only add to the GPU column.
 
 | type | n | copy floor | gpu | cpu `lsb[11]` | host `sort` | vs cpu radix | vs `sort` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `float16` | 64 Ki | 0.09 | **1.46** | 2.09 | 53.2 | 1.43x | 36.5x |
+| `float16` | 256 Ki | 0.03 | **0.84** | 2.12 | 53.3 | 2.51x | 63.2x |
+| `float16` | 1 Mi | 0.01 | **0.76** | 2.16 | 51.3 | 2.83x | 67.3x |
+| `float16` | 4 Mi | 0.01 | **0.62** | 2.78 | 51.6 | 4.52x | 83.8x |
+| `float16` | 16 Mi | 0.02 | **0.58** | 3.30 | 48.6 | 5.72x | 84.3x |
+| `bfloat16` | 64 Ki | 0.09 | **1.47** | 2.20 | 36.5 | 1.49x | 24.8x |
+| `bfloat16` | 256 Ki | 0.03 | **0.85** | 2.22 | 36.5 | 2.62x | 43.1x |
+| `bfloat16` | 1 Mi | 0.01 | **0.77** | 2.24 | 36.2 | 2.92x | 47.3x |
+| `bfloat16` | 4 Mi | 0.01 | **0.62** | 2.82 | 35.1 | 4.56x | 56.9x |
+| `bfloat16` | 16 Mi | 0.02 | **0.57** | 3.40 | 35.2 | 6.01x | 62.3x |
 | `uint32` | 64 Ki | 0.09 | 3.10 | **1.93** | 37.2 | 0.62x | 12.0x |
 | `uint32` | 256 Ki | 0.03 | 2.12 | **1.97** | 42.0 | 0.93x | 19.8x |
 | `uint32` | 1 Mi | 0.01 | **1.66** | 1.98 | 47.6 | 1.19x | 28.6x |
@@ -247,18 +264,40 @@ value distribution), at the same sizes, with the same min-of-20 and a `memcpy`
 restore inside the timed region. `mm_radix_sort`'s own `pixi run bench` uses
 different sizes and reports a mean, so it will not reproduce this column as-is.
 
+**For the 16-bit rows that column flatters the GPU here too.** Measured the
+same way at 1 Mi:
+
+| | `float16` | `bfloat16` |
+| --- | ---: | ---: |
+| cpu `lsb[11]`, as tabled | 2.16 | 2.24 |
+| cpu `lsb[8]`, what `radix_sort` picks | 1.85 | 2.14 |
+| cpu `lsb[16]`, the fastest of the three | **1.34** | **1.10** |
+| **gpu** | **0.76** | **0.77** |
+
+So the honest 1 Mi margin over the CPU is about 1.8x for `float16` and 1.4x for
+`bfloat16`, not the 2.8x and 2.9x the ratio column shows — close to the M4
+Max's 2.1x and 1.6x. The CPU figures here are a single min-of-20 run, and the
+CPU package's own Ryzen digit-width sweep saw some cells move by more than 20%
+between runs, so treat both margins as approximate.
+
 What this table says:
 
-**The crossover against the CPU radix sort is around 256 Ki to 1 Mi.**
+**The 16-bit floats are the cheapest thing here too** — 0.58 ns per element
+for `float16` and 0.57 for `bfloat16` at 16 Mi, less than half of `uint32`'s
+1.32, for four passes instead of eight. They are also the only types already
+ahead of the CPU at 64 Ki, by about 1.4–1.5x against `lsb[11]`; `lsb[16]` was
+not measured at that size.
+
+**For 32- and 64-bit keys the crossover is around 256 Ki to 1 Mi.**
 `float32` is already ahead at 256 Ki; `uint32` and `uint64` cross between
 256 Ki and 1 Mi. Below that the fixed cost of the kernel launches dominates,
 as on the M4 Max.
 
-**At scale the GPU wins by about 4x, for every type.** That margin is wider
-than the M4 Max's ~2x, and the GPU is mostly not the reason. At 16 Mi this GPU
-is 9% slower than the M4 Max's on `uint32` and 12% on `float32` — but 39%
-slower on `uint64`, so for 64-bit keys part of the wider margin really is the
-GPU.
+**At scale the GPU wins by about 4x for every 32- and 64-bit type.** That
+margin is wider than the M4 Max's ~2x, and the GPU is mostly not the reason.
+At 16 Mi this GPU is 9% slower than the M4 Max's on `uint32` and 12% on
+`float32` — but 39% slower on `uint64`, so for 64-bit keys part of the wider
+margin really is the GPU.
 
 What differs far more is the CPU: at 16 Mi the Zen 5 core takes about twice as
 long per element as the M4 Max core on 32-bit keys, and two and a half times as
@@ -289,7 +328,7 @@ increments did not.
 ## Development
 
 ```bash
-pixi run test       # both suites (16 tests) -- 9 of them need a GPU
+pixi run test       # both suites (17 tests) -- 10 of them need a GPU
 pixi run test-bits  # just the 7 that do not
 pixi run main       # the example -- needs a GPU
 pixi run bench      # the tables above -- needs a GPU
@@ -302,7 +341,7 @@ GitHub's hosted runners have no GPU, so CI runs `test-bits`, `format`, `docs`
 and `build`. That does check the one thing a copied file most needs checking:
 `test/test_bits.mojo` pins the exact bit patterns the mapping must produce, so
 this package's copy of `_bits.mojo` cannot drift from the CPU package's
-original without failing. The nine device tests are run locally before
+original without failing. The ten device tests are run locally before
 pushing, and take about a second.
 
 ## What is not here
